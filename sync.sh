@@ -133,7 +133,7 @@ case "${1:-}" in
             COUNT=$(printf "%s\n" "$NOT_FOUND" | wc -l | tr -d ' ')
             printf "%s\n" "$NOT_FOUND" > "$NOT_FOUND_LOG"
             echo "[$(timestamp)] $COUNT track(s) not found on Soulseek — running yt-dlp fallback..." | tee -a "$LOG_FILE"
-            python3 "$SYNC_DIR/seedbox.py" --batch "$NOT_FOUND_LOG" 2>&1 | tee -a "$LOG_FILE"
+            python3 "$SYNC_DIR/ytdlp_fallback.py" --batch "$NOT_FOUND_LOG" 2>&1 | tee -a "$LOG_FILE"
         else
             echo "[$(timestamp)] All tracks found on Soulseek." | tee -a "$LOG_FILE"
         fi

@@ -18,20 +18,20 @@ echo "=============================="
 # --- 1. Install .NET runtime (required for sldl) ---
 if ! command -v dotnet &>/dev/null; then
     echo ""
-    echo "[1/5] Installing .NET runtime via Homebrew..."
+    echo "[1/7] Installing .NET runtime via Homebrew..."
     if ! command -v brew &>/dev/null; then
         echo "ERROR: Homebrew is not installed. Install it from https://brew.sh first."
         exit 1
     fi
     brew install --cask dotnet-sdk
 else
-    echo "[1/5] .NET runtime already installed ✓"
+    echo "[1/7] .NET runtime already installed ✓"
 fi
 
 # --- 2. Install sldl ---
 if ! command -v sldl &>/dev/null; then
     echo ""
-    echo "[2/6] Installing sldl..."
+    echo "[2/7] Installing sldl..."
     dotnet tool install --global sldl
     # Make sure dotnet tools are on PATH
     export PATH="$HOME/.dotnet/tools:$PATH"
@@ -41,22 +41,22 @@ if ! command -v sldl &>/dev/null; then
         echo '  export PATH="$HOME/.dotnet/tools:$PATH"'
     fi
 else
-    echo "[2/6] sldl already installed ✓"
+    echo "[2/7] sldl already installed ✓"
 fi
 
 # --- 2b. Install yt-dlp + ffmpeg (Tier-3 fallback) ---
 echo ""
 if ! command -v yt-dlp &>/dev/null; then
-    echo "[2b/6] Installing yt-dlp..."
+    echo "[2b/7] Installing yt-dlp..."
     brew install yt-dlp
 else
-    echo "[2b/6] yt-dlp already installed ✓"
+    echo "[2b/7] yt-dlp already installed ✓"
 fi
 if ! command -v ffmpeg &>/dev/null; then
-    echo "[2b/6] Installing ffmpeg (required by yt-dlp)..."
+    echo "[2b/7] Installing ffmpeg (required by yt-dlp)..."
     brew install ffmpeg
 else
-    echo "[2b/6] ffmpeg already installed ✓"
+    echo "[2b/7] ffmpeg already installed ✓"
 fi
 
 # --- 3. Pioneer device FLAC support ---
@@ -113,9 +113,10 @@ searches-renew-time = 220
 concurrent-downloads = 2
 
 # Spotify sync profile
-[spotify-sync]
-input = https://open.spotify.com/playlist/4LOohrrkB5MTyYAAdnQg1x
-profile-cond = input-type == "spotify"
+# Add your playlist URL here, e.g.:
+# [spotify-sync]
+# input = https://open.spotify.com/playlist/YOUR_PLAYLIST_ID
+# profile-cond = input-type == "spotify"
 EOF
     echo "Config written to $CONFIG_DIR/sldl.conf ✓"
 else
