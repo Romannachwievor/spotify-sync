@@ -12,7 +12,9 @@ Automatically download and sync a Spotify playlist to your Mac using Soulseek. N
 ## Quick install
 
 ```bash
-bash spotify-sync-install.sh
+curl -fsSL https://raw.githubusercontent.com/Romannachwievor/spotify-sync/main/spotify-sync-install.sh \
+  -o ~/Downloads/spotify-sync-install.sh
+bash ~/Downloads/spotify-sync-install.sh
 ```
 
 The installer will guide you through every step interactively.

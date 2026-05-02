@@ -425,8 +425,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/fetch_tracks.py" ]; then
     cp "$SCRIPT_DIR/fetch_tracks.py" "$SYNC_DIR/fetch_tracks.py"
 elif [ ! -f "$SYNC_DIR/fetch_tracks.py" ]; then
-    fail "fetch_tracks.py not found. Make sure it's in the same folder as this installer."
-    exit 1
+    info "Downloading fetch_tracks.py from GitHub..."
+    curl -fsSL "https://raw.githubusercontent.com/Romannachwievor/spotify-sync/main/fetch_tracks.py" \
+        -o "$SYNC_DIR/fetch_tracks.py" || {
+        fail "Failed to download fetch_tracks.py. Check your internet connection."
+        exit 1
+    }
 fi
 
 ok "Sync script ready at ~/spotify-sync/sync.sh"
