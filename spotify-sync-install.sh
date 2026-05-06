@@ -342,6 +342,7 @@ SLDL_BIN="$HOME/spotify-sync/sldl"
 LOG_FILE="$SYNC_DIR/sync.log"
 TRACKS_FILE="$SYNC_DIR/playlist_tracks.csv"
 CONF="$HOME/.config/sldl/sldl.conf"
+INDEX_FILE="$SYNC_DIR/spotify-sync-index.sldl"
 
 if [ ! -f "$SYNC_DIR/.playlist_url" ]; then
     echo "ERROR: No playlist URL found. Re-run the installer."
@@ -368,6 +369,92 @@ fetch_tracks() {
         "$SPOTIFY_ID" "$SPOTIFY_SECRET" "$SPOTIFY_REFRESH" "$PLAYLIST_ID" "$TRACKS_FILE" 1>&2
 }
 
+# Remove downloaded tracks that are no longer present in the current playlist.
+prune_removed_tracks() {
+    local mode="${1:-apply}"
+    python3 - "$TRACKS_FILE" "$INDEX_FILE" "$LOG_FILE" "$mode" <<'PY'
+import csv
+import os
+import re
+import sys
+from datetime import datetime
+
+tracks_file, index_file, log_file, mode = sys.argv[1:]
+dry_run = mode == "preview"
+
+def ts():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def norm(text: str) -> str:
+    text = (text or "").lower()
+    text = re.sub(r"\([^)]*\)", "", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())
+
+def log(msg: str) -> None:
+    line = f"[{ts()}] {msg}"
+    print(line)
+    with open(log_file, "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+
+if not os.path.exists(tracks_file) or not os.path.exists(index_file):
+    log("Prune: tracks/index file missing; nothing to prune.")
+    sys.exit(0)
+
+playlist = set()
+with open(tracks_file, newline="", encoding="utf-8") as f:
+    for row in csv.DictReader(f):
+        playlist.add((norm(row.get("Artist", "")), norm(row.get("Title", ""))))
+
+with open(index_file, newline="", encoding="utf-8") as f:
+    reader = csv.DictReader(f)
+    fields = reader.fieldnames
+    rows = list(reader)
+
+to_remove = []
+kept_rows = []
+seen = set()
+
+for row in rows:
+    filepath = (row.get("filepath") or "").strip()
+    if not filepath.startswith("/"):
+        kept_rows.append(row)
+        continue
+    key = (norm(row.get("artist", "")), norm(row.get("title", "")))
+    if key in playlist:
+        kept_rows.append(row)
+        continue
+    if filepath in seen:
+        continue
+    seen.add(filepath)
+    to_remove.append((filepath, row.get("artist", ""), row.get("title", "")))
+
+if not to_remove:
+    log("Prune: no stale tracks found.")
+    sys.exit(0)
+
+for filepath, artist, title in to_remove:
+    if dry_run:
+        log(f"Prune preview: would remove '{artist} - {title}' -> {filepath}")
+    else:
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+                log(f"Prune: removed '{artist} - {title}' -> {filepath}")
+            except OSError as e:
+                log(f"WARN: Failed to remove {filepath}: {e}")
+
+if not dry_run:
+    with open(index_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(kept_rows)
+    log(f"Prune: removed {len(to_remove)} stale index entr{'y' if len(to_remove) == 1 else 'ies'}.")
+else:
+    log(f"Prune preview: {len(to_remove)} stale track(s) would be removed.")
+PY
+}
+
 case "${1:-}" in
     --dry|--preview)
         echo "[$(timestamp)] Fetching playlist tracks..." | tee -a "$LOG_FILE"
@@ -375,8 +462,18 @@ case "${1:-}" in
         echo "[$(timestamp)] DRY RUN — tracks that would be downloaded:" | tee -a "$LOG_FILE"
         "$SLDL_BIN" "$TRACKS_FILE" \
             --print tracks \
-            --index-path "$SYNC_DIR/spotify-sync-index.sldl" \
+            --index-path "$INDEX_FILE" \
             2>&1 | tee -a "$LOG_FILE"
+        ;;
+    --prune-preview)
+        echo "[$(timestamp)] Fetching playlist tracks for prune preview..." | tee -a "$LOG_FILE"
+        fetch_tracks
+        prune_removed_tracks preview
+        ;;
+    --prune)
+        echo "[$(timestamp)] Fetching playlist tracks for prune..." | tee -a "$LOG_FILE"
+        fetch_tracks
+        prune_removed_tracks apply
         ;;
     --status)
         echo ""
@@ -385,8 +482,8 @@ case "${1:-}" in
         echo "Playlist : $PLAYLIST_URL"
         [ -f "$TRACKS_FILE" ] && \
             echo "Tracks   : $(wc -l < "$TRACKS_FILE" | tr -d ' ') in last fetched list"
-        [ -f "$SYNC_DIR/spotify-sync-index.sldl" ] && \
-            echo "Indexed  : $(wc -l < "$SYNC_DIR/spotify-sync-index.sldl") entries"
+        [ -f "$INDEX_FILE" ] && \
+            echo "Indexed  : $(wc -l < "$INDEX_FILE") entries"
         [ -f "$LOG_FILE" ] && \
             echo "Last run : $(tail -1 "$LOG_FILE")"
         echo ""
@@ -396,6 +493,8 @@ case "${1:-}" in
         echo "Commands:"
         echo "  ~/spotify-sync/sync.sh            — sync now"
         echo "  ~/spotify-sync/sync.sh --dry       — preview without downloading"
+        echo "  ~/spotify-sync/sync.sh --prune-preview — preview files not in playlist"
+        echo "  ~/spotify-sync/sync.sh --prune     — remove files not in playlist"
         echo "  ~/spotify-sync/sync.sh --status    — show last sync info"
         echo ""
         echo "Stop auto-sync:"
@@ -410,10 +509,18 @@ case "${1:-}" in
         fetch_tracks
         echo "[$(timestamp)] Starting download..." | tee -a "$LOG_FILE"
         "$SLDL_BIN" "$TRACKS_FILE" \
-            --index-path "$SYNC_DIR/spotify-sync-index.sldl" \
+            --index-path "$INDEX_FILE" \
             --no-progress \
             2>&1 | tee -a "$LOG_FILE"
         echo "[$(timestamp)] Sync complete." | tee -a "$LOG_FILE"
+
+        SYNC_CONFIG="$SYNC_DIR/.sync-config"
+        PRUNE_REMOVED=false
+        [ -f "$SYNC_CONFIG" ] && source "$SYNC_CONFIG"
+        if [ "$PRUNE_REMOVED" = "true" ]; then
+            echo "[$(timestamp)] Pruning tracks no longer in playlist..." | tee -a "$LOG_FILE"
+            prune_removed_tracks apply
+        fi
         ;;
 esac
 SYNC_SCRIPT

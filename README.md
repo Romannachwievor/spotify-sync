@@ -31,6 +31,8 @@ The installer will guide you through every step interactively.
 ```bash
 ~/spotify-sync/sync.sh            # sync now
 ~/spotify-sync/sync.sh --dry      # preview tracks without downloading
+~/spotify-sync/sync.sh --prune-preview  # preview local files not in playlist
+~/spotify-sync/sync.sh --prune    # remove local files not in playlist
 ~/spotify-sync/sync.sh --status   # show last sync info
 ```
 
@@ -49,6 +51,16 @@ sldl's built-in Spotify extractor uses a Spotify API endpoint removed in Februar
 ## Configuration
 
 All credentials are stored in `~/.config/sldl/sldl.conf` — never committed to git.
+
+Optional sync behavior can be set in `~/spotify-sync/.sync-config`:
+
+```bash
+# Remove local files not present in the current playlist after each sync
+PRUNE_REMOVED=true
+
+# Existing option: convert FLAC downloads to MP3
+CONVERT_FLAC=false
+```
 
 ## Stop / restart auto-sync
 
