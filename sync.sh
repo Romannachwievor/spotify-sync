@@ -33,6 +33,21 @@ fetch_tracks() {
         "$SPOTIFY_ID" "$SPOTIFY_SECRET" "$SPOTIFY_REFRESH" "$PLAYLIST_ID" "$TRACKS_FILE" 1>&2
 }
 
+# Run a pure availability check with sldl (no downloads) and summarize found/not-found counts.
+research_availability() {
+    local preview_log="$SYNC_DIR/sldl_availability.log"
+    echo "[$(timestamp)] Running Soulseek availability research..." | tee -a "$LOG_FILE"
+    "$SLDL_BIN" "$TRACKS_FILE" \
+        --print tracks \
+        --index-path "$INDEX_FILE" \
+        2>&1 | tee "$preview_log" | tee -a "$LOG_FILE"
+
+    local not_found found
+    not_found=$(grep -c '^Not found: ' "$preview_log" 2>/dev/null || true)
+    found=$(grep -c '^Found: ' "$preview_log" 2>/dev/null || true)
+    echo "[$(timestamp)] Availability summary: found=$found not_found=$not_found" | tee -a "$LOG_FILE"
+}
+
 # Remove downloaded tracks that are no longer present in the current playlist.
 # Matching is done on normalized artist+title from the sldl index and playlist CSV.
 prune_removed_tracks() {
@@ -169,10 +184,12 @@ case "${1:-}" in
         echo "[$(timestamp)] Fetching playlist tracks..." | tee -a "$LOG_FILE"
         fetch_tracks
         echo "[$(timestamp)] DRY RUN — tracks that would be downloaded:" | tee -a "$LOG_FILE"
-        "$SLDL_BIN" "$TRACKS_FILE" \
-            --print tracks \
-            --index-path "$INDEX_FILE" \
-            2>&1 | tee -a "$LOG_FILE"
+        research_availability
+        ;;
+    --research|--availability)
+        echo "[$(timestamp)] Fetching playlist tracks for availability research..." | tee -a "$LOG_FILE"
+        fetch_tracks
+        research_availability
         ;;
     --prune-preview)
         echo "[$(timestamp)] Fetching playlist tracks for prune preview..." | tee -a "$LOG_FILE"
@@ -183,6 +200,18 @@ case "${1:-}" in
         echo "[$(timestamp)] Fetching playlist tracks for prune..." | tee -a "$LOG_FILE"
         fetch_tracks
         prune_removed_tracks apply
+        ;;
+    --verify)
+        echo "[$(timestamp)] Fetching playlist tracks for verification..." | tee -a "$LOG_FILE"
+        fetch_tracks
+        echo "[$(timestamp)] Running download verification (read-only)..." | tee -a "$LOG_FILE"
+        python3 "$SYNC_DIR/verify_downloads.py"
+        ;;
+    --verify-fix)
+        echo "[$(timestamp)] Fetching playlist tracks for verification..." | tee -a "$LOG_FILE"
+        fetch_tracks
+        echo "[$(timestamp)] Running download verification — mismatches will be quarantined..." | tee -a "$LOG_FILE"
+        python3 "$SYNC_DIR/verify_downloads.py" --fix
         ;;
     --status)
         echo ""
@@ -202,8 +231,11 @@ case "${1:-}" in
         echo "Commands:"
         echo "  ~/spotify-sync/sync.sh            — sync now"
         echo "  ~/spotify-sync/sync.sh --dry       — preview without downloading"
+        echo "  ~/spotify-sync/sync.sh --research  — check Soulseek availability only"
         echo "  ~/spotify-sync/sync.sh --prune-preview — preview files not in playlist"
         echo "  ~/spotify-sync/sync.sh --prune     — remove files not in playlist"
+        echo "  ~/spotify-sync/sync.sh --verify    — check downloaded tracks match the playlist"
+        echo "  ~/spotify-sync/sync.sh --verify-fix — quarantine mismatched tracks for re-download"
         echo "  ~/spotify-sync/sync.sh --status    — show last sync info"
         echo ""
         echo "Stop auto-sync:"
@@ -241,21 +273,35 @@ case "${1:-}" in
         NOT_FOUND=$(grep "^Not found: " "$SLDL_RUN_LOG" 2>/dev/null \
             | sed 's/^Not found: //' | sort -u || true)
 
-        if [ -n "$NOT_FOUND" ]; then
-            COUNT=$(printf "%s\n" "$NOT_FOUND" | wc -l | tr -d ' ')
-            printf "%s\n" "$NOT_FOUND" > "$NOT_FOUND_LOG"
-            echo "[$(timestamp)] $COUNT track(s) not found on Soulseek — running yt-dlp fallback..." | tee -a "$LOG_FILE"
-            python3 "$SYNC_DIR/ytdlp_fallback.py" --batch "$NOT_FOUND_LOG" 2>&1 | tee -a "$LOG_FILE"
-        else
-            echo "[$(timestamp)] All tracks found on Soulseek." | tee -a "$LOG_FILE"
-        fi
-
-        # --- FLAC → MP3 conversion (for devices without FLAC support) ---
+        TRACK_VERSION_MODE=spotify
         SYNC_CONFIG="$SYNC_DIR/.sync-config"
         CONVERT_FLAC=false
         PRUNE_REMOVED=false
         [ -f "$SYNC_CONFIG" ] && source "$SYNC_CONFIG"
 
+        if [ -n "$NOT_FOUND" ]; then
+            COUNT=$(printf "%s\n" "$NOT_FOUND" | wc -l | tr -d ' ')
+            printf "%s\n" "$NOT_FOUND" > "$NOT_FOUND_LOG"
+            echo "[$(timestamp)] $COUNT track(s) not found on Soulseek — running yt-dlp fallback..." | tee -a "$LOG_FILE"
+            FALLBACK_ARGS=(--batch "$NOT_FOUND_LOG" --source-order soundcloud,youtube)
+            if [ "$TRACK_VERSION_MODE" = "extended" ]; then
+                FALLBACK_ARGS+=(--mode extended)
+            elif [ "$TRACK_VERSION_MODE" = "ask" ]; then
+                if [ -t 0 ]; then
+                    FALLBACK_ARGS+=(--mode ask)
+                else
+                    echo "[$(timestamp)] TRACK_VERSION_MODE=ask ignored (no interactive terminal) — using spotify mode." | tee -a "$LOG_FILE"
+                    FALLBACK_ARGS+=(--mode spotify)
+                fi
+            else
+                FALLBACK_ARGS+=(--mode spotify)
+            fi
+            python3 "$SYNC_DIR/ytdlp_fallback.py" "${FALLBACK_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"
+        else
+            echo "[$(timestamp)] All tracks found on Soulseek." | tee -a "$LOG_FILE"
+        fi
+
+        # --- FLAC → MP3 conversion (for devices without FLAC support) ---
         if [ "$PRUNE_REMOVED" = "true" ]; then
             echo "[$(timestamp)] Pruning tracks no longer in playlist..." | tee -a "$LOG_FILE"
             prune_removed_tracks apply

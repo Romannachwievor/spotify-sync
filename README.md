@@ -31,6 +31,7 @@ The installer will guide you through every step interactively.
 ```bash
 ~/spotify-sync/sync.sh            # sync now
 ~/spotify-sync/sync.sh --dry      # preview tracks without downloading
+~/spotify-sync/sync.sh --research # check Soulseek availability (no downloads)
 ~/spotify-sync/sync.sh --prune-preview  # preview local files not in playlist
 ~/spotify-sync/sync.sh --prune    # remove local files not in playlist
 ~/spotify-sync/sync.sh --status   # show last sync info
@@ -60,7 +61,20 @@ PRUNE_REMOVED=true
 
 # Existing option: convert FLAC downloads to MP3
 CONVERT_FLAC=false
+
+# Fallback track version mode for not-found songs: spotify | extended | ask
+TRACK_VERSION_MODE=spotify
 ```
+
+Fallback order for not-found songs is now:
+1. SoundCloud search
+2. YouTube search
+
+If `TRACK_VERSION_MODE=ask` and you run sync manually in a terminal, each missing song will prompt:
+- `Spotify-version` (closer to original release)
+- `Record-pool extended` (biases toward extended intro / DJ-style edits)
+
+Auto-sync (launchd) is non-interactive, so `ask` automatically falls back to `spotify` mode.
 
 ## Stop / restart auto-sync
 
